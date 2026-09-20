@@ -9,48 +9,13 @@ import (
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
 )
 
-// stubStore — подменное хранилище. Хендлер зависит от интерфейса
-// repository.Repository, поэтому тест подставляет заглушку и проверяет,
-// что именно хендлер положил в хранилище, а не как оно устроено внутри.
-type stubStore struct {
-	gauges   map[string]float64
-	counters map[string]int64
-}
-
-func newStubStore() *stubStore {
-	return &stubStore{
-		gauges:   make(map[string]float64),
-		counters: make(map[string]int64),
-	}
-}
-
-func (s *stubStore) UpdateGauge(name string, value float64) { s.gauges[name] = value }
-func (s *stubStore) UpdateCounter(name string, delta int64) { s.counters[name] += delta }
-
-func (s *stubStore) Gauge(name string) (float64, bool) {
-	v, ok := s.gauges[name]
-	return v, ok
-}
-
-func (s *stubStore) Counter(name string) (int64, bool) {
-	v, ok := s.counters[name]
-	return v, ok
-}
-
-var _ repository.Repository = (*stubStore)(nil)
-
-// newUpdateRequest собирает запрос так, как его передаёт роутер.
-//
-// Хендлер читает сегменты через r.PathValue, а они появляются только при
-// совпадении с шаблоном маршрута. В юнит-тесте роутера нет, поэтому
-// значения проставляются вручную; связка «шаблон + хендлер» проверяется
-// в тестах пакета server.
+// newUpdateRequest собирает запрос к /update так, как его передаёт роутер.
 func newUpdateRequest(mType, name, value string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/update/"+mType+"/"+name+"/"+value, http.NoBody)
-	req.SetPathValue("type", mType)
-	req.SetPathValue("name", name)
-	req.SetPathValue("value", value)
-	return req
+	return newRequest(http.MethodPost, "/update/"+mType+"/"+name+"/"+value, map[string]string{
+		"type":  mType,
+		"name":  name,
+		"value": value,
+	})
 }
 
 func TestUpdateServeHTTP(t *testing.T) {

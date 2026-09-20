@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
 	models "github.com/GritsyukLeonid/go-musthave-metrics/internal/model"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
 )
@@ -28,12 +30,12 @@ func NewUpdate(store repository.Repository) *Update {
 //   - 404 — не передано имя метрики;
 //   - 400 — неизвестный тип или значение, которое не парсится.
 func (h *Update) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// PathValue достаёт именованные сегменты из шаблона маршрута,
-	// объявленного в main.go. Это стандартная библиотека, Go 1.22+,
+	// chi.URLParam достаёт именованные сегменты из шаблона маршрута,
+	// объявленного в пакете server: роутер кладёт их в контекст запроса,
 	// парсить r.URL.Path руками не нужно.
-	mType := r.PathValue("type")
-	name := r.PathValue("name")
-	rawValue := r.PathValue("value")
+	mType := chi.URLParam(r, "type")
+	name := chi.URLParam(r, "name")
+	rawValue := chi.URLParam(r, "value")
 
 	// Маршрут без имени («/update/gauge/») не совпадёт с шаблоном и даст 404
 	// ещё в роутере. Явная проверка нужна для запросов, которые всё же

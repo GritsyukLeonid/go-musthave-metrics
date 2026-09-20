@@ -57,6 +57,53 @@ func TestMemStorageTypesAreIndependent(t *testing.T) {
 	}
 }
 
+// TestMemStorageSnapshots проверяет то, ради чего Gauges и Counters
+// отдают копию: страница со списком метрик рендерится уже без блокировки,
+// и снимок не должен меняться под руками — ни от записи в хранилище,
+// ни от правок самого снимка.
+func TestMemStorageSnapshots(t *testing.T) {
+	s := NewMemStorage()
+
+	if got := len(s.Gauges()); got != 0 {
+		t.Errorf("в пустом хранилище %d метрик типа gauge; ожидалось 0", got)
+	}
+	if got := len(s.Counters()); got != 0 {
+		t.Errorf("в пустом хранилище %d метрик типа counter; ожидалось 0", got)
+	}
+
+	s.UpdateGauge("Alloc", 1.5)
+	s.UpdateCounter("PollCount", 5)
+
+	gauges, counters := s.Gauges(), s.Counters()
+
+	if v, ok := gauges["Alloc"]; !ok || v != 1.5 {
+		t.Errorf("Gauges()[\"Alloc\"] = %v, %v; ожидалось 1.5, true", v, ok)
+	}
+	if v, ok := counters["PollCount"]; !ok || v != 5 {
+		t.Errorf("Counters()[\"PollCount\"] = %v, %v; ожидалось 5, true", v, ok)
+	}
+
+	// Правки снимка не доезжают до хранилища.
+	gauges["Alloc"] = 100
+	delete(counters, "PollCount")
+
+	if v, _ := s.Gauge("Alloc"); v != 1.5 {
+		t.Errorf("Gauge() после правки снимка = %v; ожидалось 1.5", v)
+	}
+	if _, ok := s.Counter("PollCount"); !ok {
+		t.Error("Counter() после удаления из снимка вернул ok=false; ожидалось true")
+	}
+
+	// И наоборот: запись в хранилище не попадает в уже отданный снимок.
+	s.UpdateGauge("HeapSys", 2)
+	if _, ok := s.Gauges()["HeapSys"]; !ok {
+		t.Error("новая метрика не попала в свежий снимок")
+	}
+	if _, ok := gauges["HeapSys"]; ok {
+		t.Error("новая метрика попала в снимок, сделанный до неё")
+	}
+}
+
 // TestMemStorageConcurrentUpdates проверяет то, ради чего в MemStorage
 // добавлен mutex: http.Server обрабатывает каждый запрос в своей горутине,
 // а конкурентная запись в map — паника рантайма. Под -race тест ловит

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
@@ -60,6 +62,42 @@ func TestRouterRouting(t *testing.T) {
 			target:   "/update/histogram/Alloc/1",
 			wantCode: http.StatusBadRequest,
 		},
+		{
+			name:     "главная страница",
+			method:   http.MethodGet,
+			target:   "/",
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "POST на главную страницу",
+			method:   http.MethodPost,
+			target:   "/",
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:     "значение неизвестной метрики",
+			method:   http.MethodGet,
+			target:   "/value/gauge/Alloc",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "значение без имени метрики",
+			method:   http.MethodGet,
+			target:   "/value/gauge",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "лишний сегмент в пути значения",
+			method:   http.MethodGet,
+			target:   "/value/gauge/Alloc/1",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "POST вместо GET за значением",
+			method:   http.MethodPost,
+			target:   "/value/gauge/Alloc",
+			wantCode: http.StatusMethodNotAllowed,
+		},
 	}
 
 	for _, tt := range tests {
@@ -116,4 +154,64 @@ func TestRouterStoresMetrics(t *testing.T) {
 	if v, ok := store.Counter("PollCount"); !ok || v != 12 {
 		t.Errorf("PollCount = %v, %v; ожидалось 12, true", v, ok)
 	}
+}
+
+// TestRouterReturnsStoredMetrics — сквозная проверка чтения: принятые
+// метрики видны и поимённо в /value, и списком на главной странице.
+func TestRouterReturnsStoredMetrics(t *testing.T) {
+	store := repository.NewMemStorage()
+	srv := httptest.NewServer(NewRouter(store))
+	defer srv.Close()
+
+	for _, target := range []string{
+		"/update/gauge/Alloc/1.5",
+		"/update/gauge/Alloc/2.5",
+		"/update/counter/PollCount/5",
+		"/update/counter/PollCount/7",
+	} {
+		res, err := srv.Client().Post(srv.URL+target, "text/plain", http.NoBody)
+		if err != nil {
+			t.Fatalf("запрос %s не выполнен: %v", target, err)
+		}
+		res.Body.Close()
+	}
+
+	// gauge отдаётся последним значением, counter — суммой приращений.
+	for target, want := range map[string]string{
+		"/value/gauge/Alloc":       "2.5",
+		"/value/counter/PollCount": "12",
+	} {
+		if got := getBody(t, srv, target, http.StatusOK); got != want {
+			t.Errorf("GET %s вернул %q; ожидалось %q", target, got, want)
+		}
+	}
+
+	page := getBody(t, srv, "/", http.StatusOK)
+	for _, want := range []string{"Alloc", "2.5", "PollCount", "12"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("на главной странице нет %q:\n%s", want, page)
+		}
+	}
+}
+
+// getBody выполняет GET и возвращает тело ответа, проверив код.
+func getBody(t *testing.T, srv *httptest.Server, target string, wantCode int) string {
+	t.Helper()
+
+	res, err := srv.Client().Get(srv.URL + target)
+	if err != nil {
+		t.Fatalf("запрос %s не выполнен: %v", target, err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != wantCode {
+		t.Fatalf("GET %s: код ответа = %d; ожидался %d", target, res.StatusCode, wantCode)
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("не удалось прочитать тело ответа на %s: %v", target, err)
+	}
+
+	return string(body)
 }

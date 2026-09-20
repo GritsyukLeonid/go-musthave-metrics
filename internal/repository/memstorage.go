@@ -1,6 +1,9 @@
 package repository
 
-import "sync"
+import (
+	"maps"
+	"sync"
+)
 
 // Repository описывает операции над хранилищем метрик.
 // Хендлеру не нужно знать, лежат метрики в памяти, в файле или в БД, —
@@ -10,6 +13,8 @@ type Repository interface {
 	UpdateCounter(name string, delta int64)
 	Gauge(name string) (float64, bool)
 	Counter(name string) (int64, bool)
+	Gauges() map[string]float64
+	Counters() map[string]int64
 }
 
 // MemStorage хранит метрики в памяти процесса.
@@ -70,6 +75,26 @@ func (s *MemStorage) Counter(name string) (int64, bool) {
 
 	v, ok := s.counters[name]
 	return v, ok
+}
+
+// Gauges возвращает копию всех известных метрик типа gauge.
+//
+// Наружу отдаётся именно копия: страница со списком метрик рендерится
+// уже без блокировки, и хендлер не должен читать карту, в которую в этот
+// момент пишет соседний запрос.
+func (s *MemStorage) Gauges() map[string]float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return maps.Clone(s.gauges)
+}
+
+// Counters возвращает копию всех известных метрик типа counter.
+func (s *MemStorage) Counters() map[string]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return maps.Clone(s.counters)
 }
 
 // Проверка на этапе компиляции, что MemStorage реализует Repository.

@@ -3,35 +3,39 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-resty/resty/v2"
+
 	models "github.com/GritsyukLeonid/go-musthave-metrics/internal/model"
 )
 
-// clientTimeout ограничивает одну отправку. Без таймаута http.Client ждёт
-// ответ вечно, и один зависший сервер остановил бы весь цикл агента.
+// clientTimeout ограничивает одну отправку. Без таймаута клиент ждёт ответ
+// вечно, и один зависший сервер остановил бы весь цикл агента.
 const clientTimeout = 5 * time.Second
 
 // Client отправляет метрики на сервер в формате инкремента 2:
 // POST /update/<тип>/<имя>/<значение> с пустым телом.
 type Client struct {
-	baseURL string
-	client  *http.Client
+	client *resty.Client
 }
 
 // NewClient готовит клиента для адреса вида "http://localhost:8080".
+//
+// Адрес и общие заголовки задаются один раз на клиенте, а не собираются
+// на каждой из двадцати девяти метрик в отчёте.
 func NewClient(baseURL string) *Client {
-	return &Client{
+	client := resty.New().
 		// Хвостовой слэш в адресе дал бы "//update/..." — путь с пустым
 		// сегментом, который сервер отправит в редирект вместо обработки.
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: clientTimeout},
-	}
+		SetBaseURL(strings.TrimRight(baseURL, "/")).
+		SetTimeout(clientTimeout).
+		SetHeader("Content-Type", "text/plain")
+
+	return &Client{client: client}
 }
 
 // Send отправляет одну метрику и возвращает ошибку, если сервер ответил
@@ -42,28 +46,27 @@ func (c *Client) Send(ctx context.Context, m models.Metrics) error {
 		return err
 	}
 
-	// Имя метрики экранируется: оно приходит из карты, а не из констант,
-	// и символ "/" в нём поехал бы в путь как разделитель сегментов.
-	endpoint := c.baseURL + "/update/" + m.MType + "/" + url.PathEscape(m.ID) + "/" + value
-
-	// http.NoBody вместо nil: так Content-Length станет 0, а не пропадёт.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, http.NoBody)
-	if err != nil {
-		return fmt.Errorf("build request for %s: %w", m.ID, err)
-	}
-	req.Header.Set("Content-Type", "text/plain")
-
-	resp, err := c.client.Do(req)
+	// SetPathParams подставляет сегменты с экранированием (url.PathEscape):
+	// имя метрики приходит из карты, а не из констант, и символ "/" в нём
+	// поехал бы в путь как разделитель сегментов.
+	//
+	// Тело не задаётся: в этом формате значение целиком лежит в пути.
+	// Resty сам читает и закрывает тело ответа, поэтому соединение
+	// возвращается в пул, а не течёт по одному на метрику.
+	resp, err := c.client.R().
+		SetContext(ctx).
+		SetPathParams(map[string]string{
+			"type":  m.MType,
+			"name":  m.ID,
+			"value": value,
+		}).
+		Post("/update/{type}/{name}/{value}")
 	if err != nil {
 		return fmt.Errorf("send %s: %w", m.ID, err)
 	}
-	// Тело нужно дочитать и закрыть, иначе соединение не вернётся в пул
-	// и каждая метрика будет открывать новое TCP-подключение.
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("send %s: unexpected status %s", m.ID, resp.Status)
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("send %s: unexpected status %s", m.ID, resp.Status())
 	}
 
 	return nil
