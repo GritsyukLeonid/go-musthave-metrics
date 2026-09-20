@@ -64,19 +64,46 @@ func (s *stubSender) snapshot() []models.Metrics {
 	return append([]models.Metrics(nil), s.sent...)
 }
 
-func TestNewAppliesDefaults(t *testing.T) {
-	a := New(Config{})
+// TestNewKeepsConfig: интервалы задаёт пакет config, агент их не
+// подправляет — что передали, с тем он и работает.
+func TestNewKeepsConfig(t *testing.T) {
+	a := New(Config{ServerURL: "http://example.com", PollInterval: time.Second, ReportInterval: time.Minute})
 
-	if a.pollInterval != DefaultPollInterval {
-		t.Errorf("pollInterval = %s; ожидался %s", a.pollInterval, DefaultPollInterval)
+	if a.pollInterval != time.Second || a.reportInterval != time.Minute {
+		t.Errorf("заданные интервалы (%s, %s) не сохранились", a.pollInterval, a.reportInterval)
 	}
-	if a.reportInterval != DefaultReportInterval {
-		t.Errorf("reportInterval = %s; ожидался %s", a.reportInterval, DefaultReportInterval)
+}
+
+// TestAgentRunRejectsNonPositiveIntervals: на неположительном интервале
+// time.NewTicker паникует, поэтому Run обязан вернуть ошибку.
+func TestAgentRunRejectsNonPositiveIntervals(t *testing.T) {
+	tests := []struct {
+		name   string
+		poll   time.Duration
+		report time.Duration
+	}{
+		{
+			name: "нулевой Config",
+		},
+		{
+			name:   "нулевой poll",
+			report: time.Second,
+		},
+		{
+			name:   "отрицательный report",
+			poll:   time.Second,
+			report: -time.Second,
+		},
 	}
 
-	custom := New(Config{ServerURL: "http://example.com", PollInterval: time.Second, ReportInterval: time.Minute})
-	if custom.pollInterval != time.Second || custom.reportInterval != time.Minute {
-		t.Errorf("заданные интервалы (%s, %s) не сохранились", custom.pollInterval, custom.reportInterval)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAgent(newTestCollector(), newStubSender(), tt.poll, tt.report)
+
+			if err := a.Run(t.Context()); err == nil {
+				t.Error("Run() вернул nil; ожидалась ошибка о неположительных интервалах")
+			}
+		})
 	}
 }
 

@@ -3,18 +3,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	models "github.com/GritsyukLeonid/go-musthave-metrics/internal/model"
-)
-
-// Значения по умолчанию из задания. Флаги и переменные окружения
-// появятся в следующих инкрементах и будут перекрывать их.
-const (
-	DefaultServerURL      = "http://localhost:8080"
-	DefaultPollInterval   = 2 * time.Second
-	DefaultReportInterval = 10 * time.Second
 )
 
 // Sender отправляет метрику на сервер.
@@ -26,8 +19,8 @@ type Sender interface {
 	Send(ctx context.Context, m models.Metrics) error
 }
 
-// Config описывает настройки агента. Нулевые поля заменяются значениями
-// по умолчанию, поэтому agent.New(agent.Config{}) — рабочий агент.
+// Config описывает настройки агента. Готовый Config собирает пакет
+// config: он же разбирает флаги и подставляет значения по умолчанию.
 type Config struct {
 	ServerURL      string
 	PollInterval   time.Duration
@@ -44,16 +37,6 @@ type Agent struct {
 
 // New собирает агент с HTTP-клиентом в качестве отправщика.
 func New(cfg Config) *Agent {
-	if cfg.ServerURL == "" {
-		cfg.ServerURL = DefaultServerURL
-	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = DefaultPollInterval
-	}
-	if cfg.ReportInterval <= 0 {
-		cfg.ReportInterval = DefaultReportInterval
-	}
-
 	return newAgent(NewCollector(), NewClient(cfg.ServerURL), cfg.PollInterval, cfg.ReportInterval)
 }
 
@@ -73,6 +56,12 @@ func newAgent(collector *Collector, sender Sender, poll, report time.Duration) *
 // Оба таймера крутятся в одном select, поэтому опрос и отправка никогда
 // не выполняются одновременно — коллектору не нужна блокировка.
 func (a *Agent) Run(ctx context.Context) error {
+	// Интервалы проверяет пакет config, но нулевой Config уронил бы агент
+	// паникой внутри time.NewTicker — ошибка понятнее паники.
+	if a.pollInterval <= 0 || a.reportInterval <= 0 {
+		return fmt.Errorf("agent: intervals must be positive: poll=%s, report=%s", a.pollInterval, a.reportInterval)
+	}
+
 	poll := time.NewTicker(a.pollInterval)
 	defer poll.Stop()
 
