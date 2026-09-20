@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/GritsyukLeonid/go-musthave-metrics/internal/handler"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
+	"github.com/GritsyukLeonid/go-musthave-metrics/internal/server"
 )
 
 // serverAddr пока зашит константой: флаги и переменные окружения
@@ -23,11 +23,6 @@ func main() {
 func run() error {
 	store := repository.NewMemStorage()
 
-	mux := http.NewServeMux()
-	// Метод прямо в шаблоне маршрута: GET на этот путь получит 405,
-	// а не «молча» принятую метрику.
-	mux.Handle("POST /update/{type}/{name}/{value}", handler.NewUpdate(store))
-
 	log.Printf("metrics server is listening on %s", serverAddr)
-	return http.ListenAndServe(serverAddr, mux)
+	return http.ListenAndServe(serverAddr, server.NewRouter(store))
 }
