@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/handler"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
@@ -19,8 +20,9 @@ import (
 // chi выбран из-за именованных сегментов пути и того, что его Router —
 // это http.Handler, а хендлеры остаются обычными http.Handler:
 // переход с net/http не потребовал переписывать их сигнатуры.
-func NewRouter(store repository.Repository) http.Handler {
+func NewRouter(store repository.Repository, logger *zap.Logger) http.Handler {
 	r := chi.NewRouter()
+	r.Use(Logging(logger))
 
 	// Метод задан маршрутом: GET на /update получит 405,
 	// а не «молча» принятую метрику.
