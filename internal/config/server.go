@@ -31,6 +31,12 @@ func parseServer(args []string, out io.Writer) (Server, error) {
 		return Server{}, err
 	}
 
+	value, exists := os.LookupEnv("ADDRESS")
+
+	if exists {
+		cfg.Address = value
+	}
+
 	if cfg.Address == "" {
 		return Server{}, fail(fs, "flag -a: address must not be empty")
 	}
