@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -60,34 +61,34 @@ func TestClientSend(t *testing.T) {
 		{
 			name:     "gauge с дробным значением",
 			metric:   gauge("Alloc", 123.45),
-			wantPath: "/update/gauge/Alloc/123.45",
+			wantPath: "/update/",
 		},
 		{
 			name:     "нулевой gauge",
 			metric:   gauge("HeapIdle", 0),
-			wantPath: "/update/gauge/HeapIdle/0",
+			wantPath: "/update/",
 		},
 		{
 			name:     "отрицательный gauge",
 			metric:   gauge("RandomValue", -1.5),
-			wantPath: "/update/gauge/RandomValue/-1.5",
+			wantPath: "/update/",
 		},
 		{
 			name: "большой gauge уходит без экспоненты",
 			// Значения MemStats — это байты, у них легко получается
 			// порядок, на котором %v перешёл бы на запись вида 1.2e+10.
 			metric:   gauge("TotalAlloc", 12345678901),
-			wantPath: "/update/gauge/TotalAlloc/12345678901",
+			wantPath: "/update/",
 		},
 		{
 			name:     "counter",
 			metric:   counter(PollCount, 5),
-			wantPath: "/update/counter/PollCount/5",
+			wantPath: "/update/",
 		},
 		{
 			name:     "отрицательный counter",
 			metric:   counter(PollCount, -3),
-			wantPath: "/update/counter/PollCount/-3",
+			wantPath: "/update/",
 		},
 	}
 
@@ -108,11 +109,15 @@ func TestClientSend(t *testing.T) {
 			if got.query != "" {
 				t.Errorf("в запросе появилась строка запроса %q; ожидалась пустая", got.query)
 			}
-			if got.contentType != "text/plain" {
-				t.Errorf("Content-Type = %q; ожидался %q", got.contentType, "text/plain")
+			if got.contentType != "application/json" {
+				t.Errorf("Content-Type = %q; ожидался %q", got.contentType, "application/json")
 			}
-			if got.body != "" {
-				t.Errorf("тело запроса = %q; ожидалось пустое", got.body)
+			var sent models.Metrics
+			if err := json.Unmarshal([]byte(got.body), &sent); err != nil {
+				t.Fatalf("тело запроса не является JSON: %v", err)
+			}
+			if sent.ID != tt.metric.ID || sent.MType != tt.metric.MType {
+				t.Errorf("отправлена метрика %+v; ожидалась %+v", sent, tt.metric)
 			}
 		})
 	}
@@ -127,8 +132,8 @@ func TestClientSendTrimsTrailingSlash(t *testing.T) {
 		t.Fatalf("Send() вернул ошибку: %v", err)
 	}
 
-	if got.path != "/update/gauge/Alloc/1" {
-		t.Errorf("путь запроса = %s; ожидался /update/gauge/Alloc/1", got.path)
+	if got.path != "/update/" {
+		t.Errorf("путь запроса = %s; ожидался /update/", got.path)
 	}
 }
 
