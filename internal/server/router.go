@@ -5,28 +5,28 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/handler"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
 )
 
-// NewRouter возвращает роутер со всеми маршрутами сервера.
-//
-// Маршрутизация вынесена из main, чтобы тесты поднимали ровно тот же
-// роутер, что и прод: метод и форма пути заданы маршрутом, а не проверками
-// внутри хендлера, и проверять их надо вместе с ним.
-//
-// chi выбран из-за именованных сегментов пути и того, что его Router —
-// это http.Handler, а хендлеры остаются обычными http.Handler:
-// переход с net/http не потребовал переписывать их сигнатуры.
-func NewRouter(store repository.Repository) http.Handler {
+func NewRouter(store repository.Repository, logger *zap.Logger) http.Handler {
 	r := chi.NewRouter()
+	r.Use(Logging(logger))
 
-	// Метод задан маршрутом: GET на /update получит 405,
-	// а не «молча» принятую метрику.
+	// Старый текстовый API сохраняется для совместимости с предыдущим инкрементом.
 	r.Method(http.MethodPost, "/update/{type}/{name}/{value}", handler.NewUpdate(store))
 	r.Method(http.MethodGet, "/value/{type}/{name}", handler.NewValue(store))
-	r.Method(http.MethodGet, "/", handler.NewList(store))
 
+	// JSON API принимает пути со слешем в конце и без него.
+	updateJSON := handler.NewUpdateJSON(store)
+	valueJSON := handler.NewValueJSON(store)
+	r.Method(http.MethodPost, "/update", updateJSON)
+	r.Method(http.MethodPost, "/update/", updateJSON)
+	r.Method(http.MethodPost, "/value", valueJSON)
+	r.Method(http.MethodPost, "/value/", valueJSON)
+
+	r.Method(http.MethodGet, "/", handler.NewList(store))
 	return r
 }

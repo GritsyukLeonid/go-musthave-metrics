@@ -3,6 +3,7 @@ package config
 import (
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,6 +43,32 @@ func parseAgent(args []string, out io.Writer) (Agent, error) {
 
 	if err := parseArgs(fs, args); err != nil {
 		return Agent{}, err
+	}
+
+	value, exists := os.LookupEnv("ADDRESS")
+
+	if exists {
+		cfg.Address = value
+	}
+
+	reportValue, exists := os.LookupEnv("REPORT_INTERVAL")
+
+	if exists {
+		number, err := strconv.Atoi(reportValue)
+		if err != nil {
+			return Agent{}, err
+		}
+		report = number
+	}
+
+	pollValue, exists := os.LookupEnv("POLL_INTERVAL")
+
+	if exists {
+		number, err := strconv.Atoi(pollValue)
+		if err != nil {
+			return Agent{}, err
+		}
+		poll = number
 	}
 
 	if cfg.Address == "" {

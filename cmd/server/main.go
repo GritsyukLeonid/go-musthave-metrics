@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 
+	"go.uber.org/zap"
+
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/config"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/server"
@@ -29,9 +31,16 @@ func main() {
 
 // run отделён от main, чтобы ошибку можно было вернуть, а не гасить
 // процесс из глубины вызовов.
+
 func run(cfg config.Server) error {
 	store := repository.NewMemStorage()
 
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return err
+	}
+	defer logger.Sync()
+
 	log.Printf("metrics server is listening on %s", cfg.Address)
-	return http.ListenAndServe(cfg.Address, server.NewRouter(store))
+	return http.ListenAndServe(cfg.Address, server.NewRouter(store, logger))
 }
