@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -21,11 +25,13 @@ func counter(name string, delta int64) models.Metrics {
 
 // capturedRequest — то, что сервер увидел от агента.
 type capturedRequest struct {
-	method      string
-	path        string
-	query       string
-	contentType string
-	body        string
+	method          string
+	path            string
+	query           string
+	contentType     string
+	contentEncoding string
+	acceptEncoding  string
+	body            string
 }
 
 // newCapturingServer поднимает сервер, запоминающий последний запрос.
@@ -37,12 +43,21 @@ func newCapturingServer(t *testing.T, status int) (*httptest.Server, *capturedRe
 	var got capturedRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			zr, err := gzip.NewReader(bytes.NewReader(body))
+			if err == nil {
+				body, _ = io.ReadAll(zr)
+				_ = zr.Close()
+			}
+		}
 		got = capturedRequest{
-			method:      r.Method,
-			path:        r.URL.Path,
-			query:       r.URL.RawQuery,
-			contentType: r.Header.Get("Content-Type"),
-			body:        string(body),
+			method:          r.Method,
+			path:            r.URL.Path,
+			query:           r.URL.RawQuery,
+			contentType:     r.Header.Get("Content-Type"),
+			contentEncoding: r.Header.Get("Content-Encoding"),
+			acceptEncoding:  r.Header.Get("Accept-Encoding"),
+			body:            string(body),
 		}
 		w.WriteHeader(status)
 	}))
@@ -60,34 +75,34 @@ func TestClientSend(t *testing.T) {
 		{
 			name:     "gauge с дробным значением",
 			metric:   gauge("Alloc", 123.45),
-			wantPath: "/update/gauge/Alloc/123.45",
+			wantPath: "/update/",
 		},
 		{
 			name:     "нулевой gauge",
 			metric:   gauge("HeapIdle", 0),
-			wantPath: "/update/gauge/HeapIdle/0",
+			wantPath: "/update/",
 		},
 		{
 			name:     "отрицательный gauge",
 			metric:   gauge("RandomValue", -1.5),
-			wantPath: "/update/gauge/RandomValue/-1.5",
+			wantPath: "/update/",
 		},
 		{
 			name: "большой gauge уходит без экспоненты",
 			// Значения MemStats — это байты, у них легко получается
 			// порядок, на котором %v перешёл бы на запись вида 1.2e+10.
 			metric:   gauge("TotalAlloc", 12345678901),
-			wantPath: "/update/gauge/TotalAlloc/12345678901",
+			wantPath: "/update/",
 		},
 		{
 			name:     "counter",
 			metric:   counter(PollCount, 5),
-			wantPath: "/update/counter/PollCount/5",
+			wantPath: "/update/",
 		},
 		{
 			name:     "отрицательный counter",
 			metric:   counter(PollCount, -3),
-			wantPath: "/update/counter/PollCount/-3",
+			wantPath: "/update/",
 		},
 	}
 
@@ -108,11 +123,21 @@ func TestClientSend(t *testing.T) {
 			if got.query != "" {
 				t.Errorf("в запросе появилась строка запроса %q; ожидалась пустая", got.query)
 			}
-			if got.contentType != "text/plain" {
-				t.Errorf("Content-Type = %q; ожидался %q", got.contentType, "text/plain")
+			if got.contentType != "application/json" {
+				t.Errorf("Content-Type = %q; ожидался %q", got.contentType, "application/json")
 			}
-			if got.body != "" {
-				t.Errorf("тело запроса = %q; ожидалось пустое", got.body)
+			if got.contentEncoding != "gzip" {
+				t.Errorf("Content-Encoding = %q; ожидался gzip", got.contentEncoding)
+			}
+			if !strings.Contains(got.acceptEncoding, "gzip") {
+				t.Errorf("Accept-Encoding = %q; ожидалось gzip", got.acceptEncoding)
+			}
+			var sent models.Metrics
+			if err := json.Unmarshal([]byte(got.body), &sent); err != nil {
+				t.Fatalf("тело запроса не является JSON: %v", err)
+			}
+			if sent.ID != tt.metric.ID || sent.MType != tt.metric.MType {
+				t.Errorf("отправлена метрика %+v; ожидалась %+v", sent, tt.metric)
 			}
 		})
 	}
@@ -123,12 +148,12 @@ func TestClientSend(t *testing.T) {
 func TestClientSendTrimsTrailingSlash(t *testing.T) {
 	srv, got := newCapturingServer(t, http.StatusOK)
 
-	if err := NewClient(srv.URL+"/").Send(t.Context(), gauge("Alloc", 1)); err != nil {
+	if err := NewClient(srv.URL + "/").Send(t.Context(), gauge("Alloc", 1)); err != nil {
 		t.Fatalf("Send() вернул ошибку: %v", err)
 	}
 
-	if got.path != "/update/gauge/Alloc/1" {
-		t.Errorf("путь запроса = %s; ожидался /update/gauge/Alloc/1", got.path)
+	if got.path != "/update/" {
+		t.Errorf("путь запроса = %s; ожидался /update/", got.path)
 	}
 }
 
