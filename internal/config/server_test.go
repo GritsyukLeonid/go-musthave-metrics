@@ -9,7 +9,7 @@ import (
 
 func clearServerEnvironment(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE"} {
+	for _, key := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "DATABASE_DSN"} {
 		value, existed := os.LookupEnv(key)
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -30,6 +30,7 @@ func setServerDefaults(t *testing.T) {
 	t.Setenv("STORE_INTERVAL", "300")
 	t.Setenv("FILE_STORAGE_PATH", "/tmp/metrics-db.json")
 	t.Setenv("RESTORE", "true")
+	t.Setenv("DATABASE_DSN", "")
 }
 
 func TestParseServer(t *testing.T) {
@@ -43,15 +44,15 @@ func TestParseServer(t *testing.T) {
 			name: "без аргументов берутся значения по умолчанию",
 			want: Server{
 				Address: DefaultAddress, StoreInterval: 300 * time.Second,
-				FileStoragePath: "/tmp/metrics-db.json", Restore: true,
+				FileStoragePath: "/tmp/metrics-db.json", Restore: true, DatabaseDSN: "",
 			},
 		},
 		{
 			name: "параметры через флаги",
-			args: []string{"-a=localhost:9090", "-i=0", "-f=metrics.json", "-r=false"},
+			args: []string{"-a=localhost:9090", "-i=0", "-f=metrics.json", "-r=false", "-d=postgres://user:pass@localhost/db"},
 			want: Server{
 				Address: "localhost:9090", StoreInterval: 0,
-				FileStoragePath: "metrics.json", Restore: false,
+				FileStoragePath: "metrics.json", Restore: false, DatabaseDSN: "postgres://user:pass@localhost/db",
 			},
 		},
 		{
@@ -96,6 +97,7 @@ func TestParseServerEnvironmentOverridesFlags(t *testing.T) {
 	t.Setenv("FILE_STORAGE_PATH", "/var/tmp/metrics.json")
 	t.Setenv("RESTORE", "false")
 	t.Setenv("ADDRESS", "127.0.0.1:7777")
+	t.Setenv("DATABASE_DSN", "postgres://env:pass@localhost/metrics")
 
 	got, err := parseServer([]string{
 		"-a=localhost:9090", "-i=10", "-f=flags.json", "-r=true",
@@ -106,7 +108,7 @@ func TestParseServerEnvironmentOverridesFlags(t *testing.T) {
 
 	want := Server{
 		Address: "127.0.0.1:7777", StoreInterval: 7 * time.Second,
-		FileStoragePath: "/var/tmp/metrics.json", Restore: false,
+		FileStoragePath: "/var/tmp/metrics.json", Restore: false, DatabaseDSN: "postgres://env:pass@localhost/metrics",
 	}
 	if got != want {
 		t.Fatalf("parseServer() = %+v; ожидалось %+v", got, want)

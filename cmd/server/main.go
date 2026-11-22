@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/config"
@@ -48,9 +51,32 @@ func run(cfg config.Server) error {
 	}
 	defer logger.Sync()
 
+	var db *sql.DB
+	if cfg.DatabaseDSN != "" {
+		db, err = sql.Open("pgx", cfg.DatabaseDSN)
+		if err != nil {
+			return fmt.Errorf("open PostgreSQL connection: %w", err)
+		}
+		defer db.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			return fmt.Errorf("connect to PostgreSQL: %w", err)
+		}
+
+		var version int
+		if err := db.QueryRowContext(ctx, "SHOW server_version_num").Scan(&version); err != nil {
+			return fmt.Errorf("read PostgreSQL server version: %w", err)
+		}
+		if version < 100000 {
+			return fmt.Errorf("PostgreSQL 10 or newer is required; server version number is %d", version)
+		}
+	}
+
 	httpServer := &http.Server{
 		Addr:    cfg.Address,
-		Handler: server.NewRouter(fileStore, logger),
+		Handler: server.NewRouter(fileStore, logger, db),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

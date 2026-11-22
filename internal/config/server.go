@@ -17,6 +17,8 @@ type Server struct {
 	FileStoragePath string
 	// Restore определяет, нужно ли восстанавливать метрики при запуске.
 	Restore bool
+	// DatabaseDSN — строка подключения к PostgreSQL, флаг -d.
+	DatabaseDSN string
 }
 
 // ParseServer разбирает аргументы сервера, обычно os.Args[1:].
@@ -34,6 +36,7 @@ func parseServer(args []string, out io.Writer) (Server, error) {
 	fs.IntVar(&storeInterval, "i", 300, "интервал сохранения метрик в секундах; 0 — синхронно")
 	fs.StringVar(&cfg.FileStoragePath, "f", "/tmp/metrics-db.json", "путь к файлу сохранения метрик")
 	fs.BoolVar(&cfg.Restore, "r", true, "восстанавливать метрики из файла при запуске")
+	fs.StringVar(&cfg.DatabaseDSN, "d", "", "строка подключения к PostgreSQL")
 
 	if err := parseArgs(fs, args); err != nil {
 		return Server{}, err
@@ -58,6 +61,9 @@ func parseServer(args []string, out io.Writer) (Server, error) {
 			return Server{}, fail(fs, "RESTORE must be a boolean: %v", err)
 		}
 		cfg.Restore = restore
+	}
+	if value, exists := os.LookupEnv("DATABASE_DSN"); exists {
+		cfg.DatabaseDSN = value
 	}
 
 	if cfg.Address == "" {

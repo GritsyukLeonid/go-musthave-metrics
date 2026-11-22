@@ -70,6 +70,12 @@ func TestRouterRouting(t *testing.T) {
 			wantCode: http.StatusOK,
 		},
 		{
+			name:     "ping без подключённой БД",
+			method:   http.MethodGet,
+			target:   "/ping",
+			wantCode: http.StatusInternalServerError,
+		},
+		{
 			name:     "POST на главную страницу",
 			method:   http.MethodPost,
 			target:   "/",

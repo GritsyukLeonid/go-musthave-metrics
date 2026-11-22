@@ -2,6 +2,7 @@
 package server
 
 import (
+	"database/sql"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,11 +12,18 @@ import (
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
 )
 
-func NewRouter(store repository.Repository, logger *zap.Logger) http.Handler {
+func NewRouter(store repository.Repository, logger *zap.Logger, databases ...*sql.DB) http.Handler {
 	r := chi.NewRouter()
 	r.Use(Logging(logger))
 	r.Use(GzipDecompress)
 	r.Use(GzipCompress)
+
+	// Проверка доступности PostgreSQL.
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	r.Method(http.MethodGet, "/ping", handler.NewPing(db))
 
 	// Старый текстовый API сохраняется для совместимости с предыдущим инкрементом.
 	r.Method(http.MethodPost, "/update/{type}/{name}/{value}", handler.NewUpdate(store))
