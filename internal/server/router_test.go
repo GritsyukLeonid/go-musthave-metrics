@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/GritsyukLeonid/go-musthave-metrics/internal/repository"
+	"go.uber.org/zap"
 )
 
 // TestRouterRouting проверяет то, что задано шаблоном маршрута, а не кодом
@@ -69,6 +70,12 @@ func TestRouterRouting(t *testing.T) {
 			wantCode: http.StatusOK,
 		},
 		{
+			name:     "ping без подключённой БД",
+			method:   http.MethodGet,
+			target:   "/ping",
+			wantCode: http.StatusInternalServerError,
+		},
+		{
 			name:     "POST на главную страницу",
 			method:   http.MethodPost,
 			target:   "/",
@@ -102,7 +109,8 @@ func TestRouterRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := NewRouter(repository.NewMemStorage())
+			logger := zap.NewNop()
+			router := NewRouter(repository.NewMemStorage(), logger)
 
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.target, http.NoBody))
@@ -118,7 +126,8 @@ func TestRouterRouting(t *testing.T) {
 // хранилище: значения из URL доезжают до хранилища с нужной семантикой.
 func TestRouterStoresMetrics(t *testing.T) {
 	store := repository.NewMemStorage()
-	srv := httptest.NewServer(NewRouter(store))
+	logger := zap.NewNop()
+	srv := httptest.NewServer(NewRouter(store, logger))
 	defer srv.Close()
 
 	targets := []string{
@@ -160,7 +169,8 @@ func TestRouterStoresMetrics(t *testing.T) {
 // метрики видны и поимённо в /value, и списком на главной странице.
 func TestRouterReturnsStoredMetrics(t *testing.T) {
 	store := repository.NewMemStorage()
-	srv := httptest.NewServer(NewRouter(store))
+	logger := zap.NewNop()
+	srv := httptest.NewServer(NewRouter(store, logger))
 	defer srv.Close()
 
 	for _, target := range []string{
